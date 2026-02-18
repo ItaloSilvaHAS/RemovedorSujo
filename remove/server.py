@@ -11,21 +11,22 @@ CORS(app)
 
 logging.basicConfig(level=logging.INFO)
 
-# O modelo ISNET-GENERAL-USE é o topo de linha para objetos físicos
+# --- CONFIGURAÇÃO DO MODELO LEVE ---
+# Forçamos o uso do u2netp (p de portable) para rodar no plano gratuito
+os.environ["U2NET_HOME"] = os.path.join(os.getcwd(), ".u2net")
+
 try:
-    session = new_session("isnet-general-use")
+    logging.info("Carregando modelo ultra-leve U2NETP...")
+    # O modelo u2netp consome pouquíssima RAM
+    session = new_session("u2netp")
 except Exception as e:
-    logging.warning(f"Não foi possível carregar o modelo isnet: {e}. Usando modelo padrão.")
-    session = new_session("u2net")
+    logging.error(f"Erro ao carregar modelo: {e}")
+    session = new_session("u2netp") # Tentativa de redundância
 
 def process_ml_format(input_data):
     input_image = Image.open(io.BytesIO(input_data))
     
-    # --- MELHORIA NO RECORTE ---
-    # alpha_matting: Refina as bordas para não ficar serrilhado
-    # foreground_threshold: Ajustado para 240 para ser mais permissivo com detalhes metálicos
-    # background_threshold: Reduzido para 10 para limpar rebarbas mais sutis
-    # erode_size: Reduzido para 10 para evitar comer demais o objeto, mas limpando a borda
+    # Recorte otimizado
     output_transparent = remove(
         input_image, 
         session=session,
@@ -35,13 +36,10 @@ def process_ml_format(input_data):
         alpha_matting_erode_size=10
     )
     
-    # 1. CROP TOTAL (Remove o vazio)
     bbox = output_transparent.getbbox()
     if bbox:
         output_transparent = output_transparent.crop(bbox)
     
-    # 2. REDIMENSIONAMENTO MÁXIMO (1080x1080)
-    # Aumentamos a escala para o objeto ocupar 95% do canvas (quase borda a borda)
     target_size = (1080, 1080)
     padding_factor = 0.95 
     width, height = output_transparent.size
@@ -51,21 +49,15 @@ def process_ml_format(input_data):
     
     output_transparent = output_transparent.resize(new_size, Image.Resampling.LANCZOS)
     
-    # 3. FUNDO BRANCO PURO
     canvas = Image.new("RGB", target_size, (255, 255, 255))
-    
-    # 4. CENTRALIZAÇÃO TOTAL
     offset = (
         (target_size[0] - output_transparent.width) // 2,
         (target_size[1] - output_transparent.height) // 2
     )
     
-    # Colamos usando a própria imagem como máscara para manter a suavidade
     canvas.paste(output_transparent, offset, mask=output_transparent)
     
-    # 5. SALVAMENTO PROFISSIONAL
     img_io = io.BytesIO()
-    # quality=100 e subsampling=0 garantem que a compressão não estrague os detalhes
     canvas.save(img_io, 'JPEG', quality=100, subsampling=0)
     img_io.seek(0)
     return img_io
@@ -78,22 +70,15 @@ def remove_background():
             
         file = request.files['image']
         result_buffer = process_ml_format(file.read())
-        
-        logging.info("Imagem processada com refino de bordas e tamanho máximo.")
         return send_file(result_buffer, mimetype='image/jpeg')
     except Exception as e:
-        logging.error(f"Erro: {str(e)}")
+        logging.error(f"Erro no processamento: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return jsonify({"status": "online", "model": "isnet-general-use"}), 200
+    return jsonify({"status": "online", "model": "u2netp"}), 200
 
 if __name__ == '__main__':
-    # O Render injeta a porta necessária através da variável de ambiente PORT
-    # Se não encontrar (rodando local), ele usa a 5000 por padrão
-    port = int(os.environ.get("PORT", 5000))
-    
-    # Em produção (Render), o ideal é usar gunicorn, 
-    # mas deixamos o app.run aqui para você continuar testando localmente
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, debug=False)

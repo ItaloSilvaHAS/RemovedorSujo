@@ -3,4 +3,4 @@ flask-cors
 rembg[cpu]
 pillow
 gunicorn
-numpy
+onnxruntime
