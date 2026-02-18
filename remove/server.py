@@ -4,6 +4,7 @@ from rembg import remove, new_session
 from PIL import Image
 import io
 import logging
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -11,22 +12,27 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 # O modelo ISNET-GENERAL-USE é o topo de linha para objetos físicos
-session = new_session("isnet-general-use")
+try:
+    session = new_session("isnet-general-use")
+except Exception as e:
+    logging.warning(f"Não foi possível carregar o modelo isnet: {e}. Usando modelo padrão.")
+    session = new_session("u2net")
 
 def process_ml_format(input_data):
     input_image = Image.open(io.BytesIO(input_data))
     
     # --- MELHORIA NO RECORTE ---
     # alpha_matting: Refina as bordas para não ficar serrilhado
-    # foreground_threshold: Aumentado para 270 (evita que a IA ache que o metal é fundo)
-    # erode_size: Definido em 15 para "lixar" as bordas e tirar pixels soltos
+    # foreground_threshold: Ajustado para 240 para ser mais permissivo com detalhes metálicos
+    # background_threshold: Reduzido para 10 para limpar rebarbas mais sutis
+    # erode_size: Reduzido para 10 para evitar comer demais o objeto, mas limpando a borda
     output_transparent = remove(
         input_image, 
         session=session,
         alpha_matting=True,
-        alpha_matting_foreground_threshold=270,
-        alpha_matting_background_threshold=20,
-        alpha_matting_erode_size=15
+        alpha_matting_foreground_threshold=240,
+        alpha_matting_background_threshold=10,
+        alpha_matting_erode_size=10
     )
     
     # 1. CROP TOTAL (Remove o vazio)
@@ -35,14 +41,14 @@ def process_ml_format(input_data):
         output_transparent = output_transparent.crop(bbox)
     
     # 2. REDIMENSIONAMENTO MÁXIMO (1080x1080)
+    # Aumentamos a escala para o objeto ocupar 95% do canvas (quase borda a borda)
     target_size = (1080, 1080)
+    padding_factor = 0.95 
     width, height = output_transparent.size
     
-    # Calculamos para ocupar 100% do espaço disponível
-    ratio = min(target_size[0] / width, target_size[1] / height)
+    ratio = min((target_size[0] * padding_factor) / width, (target_size[1] * padding_factor) / height)
     new_size = (int(width * ratio), int(height * ratio))
     
-    # Resampling.LANCZOS é essencial para não pixelar ao aumentar
     output_transparent = output_transparent.resize(new_size, Image.Resampling.LANCZOS)
     
     # 3. FUNDO BRANCO PURO
@@ -79,6 +85,15 @@ def remove_background():
         logging.error(f"Erro: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/', methods=['GET'])
+def health_check():
+    return jsonify({"status": "online", "model": "isnet-general-use"}), 200
+
 if __name__ == '__main__':
-    # debug=False para o servidor ficar mais estável no Garuda
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # O Render injeta a porta necessária através da variável de ambiente PORT
+    # Se não encontrar (rodando local), ele usa a 5000 por padrão
+    port = int(os.environ.get("PORT", 5000))
+    
+    # Em produção (Render), o ideal é usar gunicorn, 
+    # mas deixamos o app.run aqui para você continuar testando localmente
+    app.run(host='0.0.0.0', port=port, debug=False)

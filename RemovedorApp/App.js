@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { Button, Image, View, ActivityIndicator, Alert, StyleSheet, Text, ScrollView } from 'react-native';
+import { 
+  Button, 
+  Image, 
+  View, 
+  ActivityIndicator, 
+  Alert, 
+  StyleSheet, 
+  Text, 
+  ScrollView, 
+  TouchableOpacity,
+  StatusBar
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -7,8 +18,10 @@ import * as Sharing from 'expo-sharing';
 export default function App() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [currentProcessing, setCurrentProcessing] = useState(0);
+  const [totalToProcess, setTotalToProcess] = useState(0);
 
-  // Mantenha seu IP atualizado aqui
+  // IP Fixo da sua máquina
   const SERVER_URL = 'http://192.168.0.6:5000/remove-bg';
 
   const pickImages = async () => {
@@ -21,7 +34,7 @@ export default function App() {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      selectionLimit: 10, // LIMITE DE 10 IMAGENS!
+      selectionLimit: 10,
       quality: 1,
     });
 
@@ -32,15 +45,19 @@ export default function App() {
 
   const processQueue = async (assets) => {
     setLoading(true);
+    setTotalToProcess(assets.length);
+    setCurrentProcessing(0);
     setImages([]); 
     const processed = [];
 
-    for (const asset of assets) {
+    for (let i = 0; i < assets.length; i++) {
+      setCurrentProcessing(i + 1);
+      const asset = assets[i];
       try {
         const formData = new FormData();
         formData.append('image', { 
           uri: asset.uri, 
-          name: 'input_image.jpg', 
+          name: `image_${i}.jpg`, 
           type: 'image/jpeg' 
         });
 
@@ -57,6 +74,8 @@ export default function App() {
             reader.onloadend = () => resolve(reader.result);
           });
           processed.push(base64);
+          // Atualiza a lista conforme processa para feedback visual imediato
+          setImages(prev => [...prev, base64]);
         } else {
           console.log("Erro no servidor ao processar uma imagem.");
         }
@@ -65,10 +84,9 @@ export default function App() {
       }
     }
 
-    setImages(processed);
     setLoading(false);
     if (processed.length > 0) {
-      Alert.alert("Sucesso!", `${processed.length} imagens processadas no padrão ML!`);
+      Alert.alert("Sucesso!", `${processed.length} imagens processadas com qualidade máxima!`);
     }
   };
 
@@ -92,92 +110,167 @@ export default function App() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>ML Photo Express</Text>
-      
-      <View style={styles.mainButton}>
-        <Button title="Selecionar até 10 Fotos" onPress={pickImages} color="#2196F3" />
-      </View>
-
-      {loading && (
-        <View style={styles.loader}>
-          <ActivityIndicator size="large" color="#FFE600" />
-          <Text style={styles.loadingText}>Sua IA está criando o fundo branco...</Text>
+    <View style={{ flex: 1 }}>
+      <StatusBar barStyle="dark-content" />
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>ML Photo Express</Text>
+          <Text style={styles.subtitle}>IA de Remoção Profissional</Text>
         </View>
-      )}
+        
+        <TouchableOpacity style={styles.mainButton} onPress={pickImages} disabled={loading}>
+          <Text style={styles.buttonText}>
+            {loading ? 'Processando...' : 'Selecionar até 10 Fotos'}
+          </Text>
+        </TouchableOpacity>
 
-      {images.map((img, index) => (
-        <View key={index} style={styles.card}>
-          <Image source={{ uri: img }} style={styles.image} />
-          <View style={styles.cardActions}>
-             <Button title="Baixar / Compartilhar" onPress={() => shareImage(img)} color="#4CAF50" />
+        {loading && (
+          <View style={styles.loader}>
+            <ActivityIndicator size="large" color="#3483fa" />
+            <Text style={styles.loadingText}>
+              Processando {currentProcessing} de {totalToProcess}
+            </Text>
+            <Text style={styles.subLoadingText}>Sua IA está refinando as bordas...</Text>
           </View>
-        </View>
-      ))}
+        )}
 
-      {images.length > 0 && (
-        <View style={styles.footer}>
-          <Button title="Limpar Tudo" onPress={() => setImages([])} color="#f44336" />
+        <View style={styles.grid}>
+          {images.map((img, index) => (
+            <View key={index} style={styles.card}>
+              <View style={styles.imageContainer}>
+                <Image source={{ uri: img }} style={styles.image} />
+              </View>
+              <TouchableOpacity style={styles.downloadBtn} onPress={() => shareImage(img)}>
+                <Text style={styles.downloadBtnText}>Baixar / Compartilhar</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
         </View>
-      )}
-    </ScrollView>
+
+        {images.length > 0 && !loading && (
+          <TouchableOpacity style={styles.clearButton} onPress={() => setImages([])}>
+            <Text style={styles.clearButtonText}>Limpar Galeria</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { 
     flexGrow: 1, 
-    backgroundColor: '#FFE600', // Amarelo Mercado Livre
+    backgroundColor: '#F5F5F5', 
     alignItems: 'center', 
     paddingVertical: 40 
   },
+  header: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
   title: { 
-    fontSize: 28, 
-    fontWeight: 'bold', 
-    marginBottom: 20, 
-    color: '#333' 
+    fontSize: 32, 
+    fontWeight: '900', 
+    color: '#333',
+    letterSpacing: -1
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 5
   },
   mainButton: { 
+    backgroundColor: '#3483fa',
     width: '90%', 
-    marginBottom: 30 
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    marginBottom: 20
+  },
+  buttonText: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: 'bold'
   },
   loader: { 
-    marginVertical: 20, 
+    marginVertical: 10, 
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: '#FFF',
     padding: 20,
-    borderRadius: 15
+    borderRadius: 20,
+    width: '90%',
+    borderWidth: 1,
+    borderColor: '#EEE'
   },
   loadingText: {
     marginTop: 10,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333'
   },
+  subLoadingText: {
+    color: '#999',
+    marginTop: 5
+  },
+  grid: {
+    width: '100%',
+    alignItems: 'center'
+  },
   card: { 
     backgroundColor: '#fff', 
-    padding: 10, 
-    borderRadius: 15, 
+    padding: 12, 
+    borderRadius: 20, 
     marginBottom: 25, 
     alignItems: 'center', 
-    width: '90%',
-    elevation: 6,
+    width: '92%',
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10
+  },
+  imageContainer: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#F0F0F0'
   },
   image: { 
-    width: 300, 
-    height: 300, 
-    resizeMode: 'contain', 
-    backgroundColor: '#fff' // Garante fundo branco visual
+    width: '100%', 
+    height: '100%', 
+    resizeMode: 'contain'
   },
-  cardActions: {
+  downloadBtn: {
     marginTop: 15,
-    width: '100%'
+    backgroundColor: '#00a650',
+    width: '100%',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center'
   },
-  footer: {
+  downloadBtnText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+  clearButton: {
+    marginTop: 10,
+    padding: 15,
     width: '90%',
+    alignItems: 'center',
     marginBottom: 40
+  },
+  clearButtonText: {
+    color: '#FF4444',
+    fontWeight: 'bold',
+    fontSize: 16
   }
 });
